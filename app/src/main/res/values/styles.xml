@@ -458,7 +458,7 @@
 
     <style name="LoadedStyle">
         <item name="android:navigationBarColor">?attr/primaryGrayBackground</item>
-        <item name="android:windowBackground">?attr/primaryBlackBackground</item>
+        <item name="android:windowBackground">@drawable/moflvfly_gradient</item>
     </style>
 
     <style name="AndroidSearchView" parent="AppSearchViewStyle">
