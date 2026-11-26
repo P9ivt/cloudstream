@@ -14,6 +14,87 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate app icon from the logo image
+        run: |
+          pip install pillow
+          python - <<'PY'
+          import os, sys
+          from PIL import Image, ImageDraw, ImageFilter
+
+          exts = ('.png', '.jpg', '.jpeg', '.webp')
+          cands = [f for f in os.listdir('.') if os.path.isfile(f) and f.lower().endswith(exts)]
+          cands.sort(key=lambda f: (not f.lower().startswith('logo'), f.lower()))
+          if not cands:
+              print('NO LOGO IMAGE FOUND IN REPO ROOT - building with the default icon')
+              sys.exit(0)
+          print('Using logo image:', cands[0])
+
+          src = Image.open(cands[0]).convert('RGB')
+          w, h = src.size
+          s = min(w, h)
+          left, top = (w - s) // 2, (h - s) // 2
+          src = src.crop((left, top, left + s, top + s))
+
+          base = 'app/src/debug/res'
+
+          # Adaptive foreground: 432x432 canvas, logo fills the 288px visible window
+          vis = src.resize((288, 288), Image.LANCZOS)
+          canvas = Image.new('RGB', (432, 432))
+          canvas.paste(vis, (72, 72))
+          canvas.paste(vis.crop((0, 0, 288, 1)).resize((288, 72)), (72, 0))
+          canvas.paste(vis.crop((0, 287, 288, 288)).resize((288, 72)), (72, 360))
+          canvas.paste(vis.crop((0, 0, 1, 288)).resize((72, 288)), (0, 72))
+          canvas.paste(vis.crop((287, 0, 288, 288)).resize((72, 288)), (360, 72))
+          for x, y, p in [(0, 0, (0, 0)), (360, 0, (287, 0)), (0, 360, (0, 287)), (360, 360, (287, 287))]:
+              canvas.paste(Image.new('RGB', (72, 72), vis.getpixel(p)), (x, y))
+          blurred = canvas.filter(ImageFilter.GaussianBlur(14))
+          mask = Image.new('L', (432, 432), 255)
+          ImageDraw.Draw(mask).rectangle([72, 72, 359, 359], fill=0)
+          mask = mask.filter(ImageFilter.GaussianBlur(3))
+          fg = Image.composite(blurred, canvas, mask)
+          os.makedirs(base + '/drawable-nodpi', exist_ok=True)
+          fg.save(base + '/drawable-nodpi/moflvfly_icon_fg.png')
+
+          # Legacy icons (Android 7 and older): rounded square and circle
+          def shaped(size, kind):
+              big = size * 4
+              img = src.resize((big, big), Image.LANCZOS).convert('RGBA')
+              m = Image.new('L', (big, big), 0)
+              d = ImageDraw.Draw(m)
+              if kind == 'round':
+                  d.ellipse([0, 0, big - 1, big - 1], fill=255)
+              else:
+                  d.rounded_rectangle([0, 0, big - 1, big - 1], radius=int(big * 0.22), fill=255)
+              img.putalpha(m)
+              return img.resize((size, size), Image.LANCZOS)
+
+          for dpi, px in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
+              d = base + '/mipmap-' + dpi
+              os.makedirs(d, exist_ok=True)
+              shaped(px, 'square').save(d + '/ic_launcher.png')
+              shaped(px, 'round').save(d + '/ic_launcher_round.png')
+
+          # Adaptive icon definitions (v26 and v33)
+          xml = (
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <background android:drawable="@android:color/white"/>\n'
+              '    <foreground android:drawable="@drawable/moflvfly_icon_fg"/>\n'
+              '</adaptive-icon>\n'
+          )
+          for v in ('v26', 'v33'):
+              d = base + '/mipmap-anydpi-' + v
+              os.makedirs(d, exist_ok=True)
+              for n in ('ic_launcher.xml', 'ic_launcher_round.xml'):
+                  with open(d + '/' + n, 'w', encoding='utf-8') as f:
+                      f.write(xml)
+
+          print('Icon files generated under', base)
+          PY
 
       - name: Build debug APK
         run: |
